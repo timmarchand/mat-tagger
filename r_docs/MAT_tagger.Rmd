@@ -1,0 +1,1288 @@
+---
+title: "Chapter 5 - MAT Tagger results"
+author: "Tim Marchand"
+date: "27, February, 2020"
+output: html_document
+---
+### Importing the data from the MAT tagger output 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+# Install libraries
+library(tidyverse)
+library(gsubfn)
+library(reshape2)
+library(janitor)
+library(ggpubr)
+library(broom)
+
+
+# set parameters
+today <- Sys.Date()
+DimFolder <- "MAT_Dimensions"
+OutputFolder <- "Output"
+
+# Install files
+## create file names vector
+myfiles <- list.files(DimFolder, pattern = "*.dat")
+allfiles <- paste0(DimFolder,"/",myfiles)
+## make a list of the imported files
+l_dims <- lapply(allfiles, read_delim, delim = "\t")
+## create a single df by binding rows
+dims <- do.call(bind_rows,l_dims)
+## add a corpus variable
+dims$corpus <- gsubfn("([A-Z]{3}).*","\\1",dims$Filename)
+## remove corpus total rows
+dims_total <- dims[ which(dims$corpus=='COR'), ]
+dims <- dims[ which(dims$corpus!='COR'), ]
+## add corpus info to dims_total variable and rename the first column accordingly
+dims_total$Filename <- unique(dims$corpus)
+names(dims_total)[names(dims_total) == 'Filename'] <- 'Corpus'
+## drop corpus column
+dims_total %>% select(-corpus) -> dims_total
+## change Filename to text_id
+names(dims)[names(dims) == 'Filename'] <- 'text_id'
+## clean the names
+dims_total <- janitor::clean_names(dims_total)
+dims <- janitor::clean_names(dims)
+```
+```{r}
+knitr::kable(dims_total, caption = "Overall results from the MAT tagger.")
+```
+
+### Load the stats folder to get wordcount data
+```{r}
+
+StatsFolder <- "MAT_Statistics"
+
+## create file names vector
+myfiles <- list.files(StatsFolder, pattern = "*.dat")
+allfiles <- paste0(StatsFolder,"/",myfiles)
+## make a list of the imported files
+l_stats <- lapply(allfiles, read_delim, delim = "\t")
+## create a single df by binding rows
+stats <- do.call(bind_rows,l_stats)
+## add a corpus variable
+stats$corpus <- gsubfn("([A-Z]{3}).*","\\1",stats$Filename)
+## remove corpus total rows
+stats_total <- stats[ which(stats$corpus=='COR'), ]
+stats <- stats[ which(stats$corpus!='COR'), ]
+## add corpus info to dims_total variable and rename the first column accordingly
+stats_total$text_id <- unique(stats$corpus)
+names(stats_total)[names(stats_total) == 'Filename'] <- 'Corpus'
+## drop corpus column
+stats_total %>% select(-corpus) -> stats_total
+## change Filename to text_id
+names(stats)[names(stats) == 'Filename'] <- 'text_id'
+## clean the names
+stats_total <- janitor::clean_names(stats_total)
+stats <- janitor::clean_names(stats)
+stats <- stats %>% rename(wordcount = tokens)
+
+text_wc <- stats %>% select(text_id,wordcount)
+
+```
+
+
+
+
+### Adding wordcount data to the files
+```{r include = FALSE}
+## get the text files and word count data from another project
+# pos_count <- read_csv( "/Users/Tim/Downloads/EFA_select/output/2020-02-26_all_files_tag_pos.csv")
+# names(pos_count)
+# ## rename the column
+# for_join <- pos_count %>% select(text_id,wordcount)
+# ## find and replace the dashes to match
+# for_join$text_id <- gsubfn("_","-",for_join$text_id)
+
+## join the data togther
+
+## add the wordcount to dims for filtering later
+dims$wordcount <- stats$wordcount
+
+## clean the column names
+janitor::clean_names(dims) -> dims
+
+## add the mode variable
+dims$mode <- ifelse(dims$corpus == "DEM","SPKN",
+                          ifelse(dims$corpus %in% c("HOC","JOC"),"ACMC","WTTN"))
+
+## make corpus details levels and reorder
+dims$corpus <- factor(dims$corpus, levels=c("ACA","NWS","FIC","HOC","JOC","DEM"))
+dims$mode <- factor(dims$mode, levels =c("WTTN","ACMC","SPKN"))
+
+#### you can also do this from the MAT output file!!
+```
+### Testing the Dimensions (ANOVA and equivalent)
+
+```{r}
+## mode comparisons
+modelm1 <- lm(formula = dimension1 ~ mode, data = dims)
+modelm2 <- lm(formula = dimension1 ~ mode, data = dims)
+modelm3 <- lm(formula = dimension1 ~ mode, data = dims)
+modelm4 <- lm(formula = dimension1 ~ mode, data = dims)
+modelm5 <- lm(formula = dimension1 ~ mode, data = dims)
+modelm6 <- lm(formula = dimension1 ~ mode, data = dims)
+
+## get the analysis of var table
+aov_mode1 <- aov(modelm1)
+aov_mode2 <- anova(modelm2)
+aov_mode3 <- anova(modelm3)
+aov_mode4 <- anova(modelm4)
+aov_mode5 <- anova(modelm5)
+aov_mode6 <- anova(modelm6)
+
+## get the TUKEY multiple comparisons
+TukeyHSD(aov_mode1)
+
+## corpus comparisons
+## set the generalised models
+dimlm1 <- lm(formula = dimension1 ~ corpus, data = dims)
+dimlm2 <- lm(formula = dimension1 ~ corpus, data = dims)
+dimlm3 <- lm(formula = dimension1 ~ corpus, data = dims)
+dimlm4 <- lm(formula = dimension1 ~ corpus, data = dims)
+dimlm5 <- lm(formula = dimension1 ~ corpus, data = dims)
+dimlm6 <- lm(formula = dimension1 ~ corpus, data = dims)
+
+
+## get the analysis of var table
+aov_dim1 <- aov(dimlm1)
+aov_dim2 <- anova(dimlm2)
+aov_dim3 <- anova(dimlm3)
+aov_dim4 <- anova(dimlm4)
+aov_dim5 <- anova(dimlm5)
+aov_dim6 <- anova(dimlm6)
+
+## get the TUKEY multiple comparisons
+TukeyHSD(aov_dim1)
+
+
+```
+
+
+
+
+### Boxplots of the dimensions by mode
+```{r}
+# define colour scale for mode
+
+# simple function for creating summary stats
+data_summary <- function(x) {
+   m <- mean(x)
+   ymin <- m-sd(x)
+   ymax <- m+sd(x)
+   return(c(y=m,ymin=ymin,ymax=ymax))
+}
+
+mdims <- dims
+mdims$mode <-  recode(mdims$mode,SPKN="SPK", ACMC="CMC",WTTN="WTN")
+
+mode_scale <- c("#6baed6", "#bdd7e7", "#eff3ff")
+pmc1 <- mdims %>% group_by(mode) %>%  
+  filter(wordcount >799) %>% 
+  ggplot(aes(x=mode, y=dimension1,fill = mode)) +
+  geom_boxplot() +
+   scale_fill_manual(values=mode_scale) +
+      theme_minimal() +
+    theme(legend.position="none") +
+ stat_summary(fun.data=data_summary, 
+                 geom="pointrange", color="red") +
+      coord_flip() + # This switch X and Y axis and allows to get the horizontal version
+    xlab("") +
+    ylab("Dimension 1 scores by mode") 
+
+pmc2 <- mdims %>% group_by(mode) %>% 
+    filter(wordcount >799) %>% 
+  ggplot(aes(x=mode, y=dimension2,fill = mode)) +
+  # geom_boxplot() +
+   geom_violin(trim=FALSE) +
+   scale_fill_manual(values=mode_scale) +
+      theme_minimal() +
+    theme(legend.position="none") +
+ stat_summary(fun.data=data_summary, 
+                 geom="pointrange", color="red") +
+      coord_flip() + # This switch X and Y axis and allows to get the horizontal version
+    xlab("") +
+    ylab("Dimension 2 scores by mode") 
+
+pm3 <- mdims %>% group_by(mode) %>% 
+  ggplot(aes(x=mode, y=dimension3,fill = mode)) +
+  geom_violin(trim=FALSE) +
+   scale_fill_manual(values=mode_scale) +
+      theme_minimal() +
+    theme(legend.position="none") +
+ stat_summary(fun.data=data_summary, 
+                 geom="pointrange", color="red") +
+      coord_flip() + # This switch X and Y axis and allows to get the horizontal version
+    xlab("") +
+    ylab("Dimension 3 scores by mode") +
+  ggpubr::stat_compare_means(label.x.npc = "right", label.y.npc = "bottom", paired = TRUE)
+
+pm4 <- mdims %>% group_by(mode) %>% 
+  ggplot(aes(x=mode, y=dimension4,fill = mode)) +
+  geom_violin(trim=FALSE) +
+   scale_fill_manual(values=mode_scale) +
+      theme_minimal() +
+    theme(legend.position="none") +
+ stat_summary(fun.data=data_summary, 
+                 geom="pointrange", color="red") +
+      coord_flip() + # This switch X and Y axis and allows to get the horizontal version
+    xlab("") +
+    ylab("Dimension 4 scores by mode") 
+
+pm5 <- mdims %>% group_by(mode) %>% 
+  ggplot(aes(x=mode, y=dimension5,fill = mode)) +
+  geom_violin(trim=FALSE) +
+   scale_fill_manual(values=mode_scale) +
+      theme_minimal() +
+    theme(legend.position="none") +
+ stat_summary(fun.data=data_summary, 
+                 geom="pointrange", color="red") +
+      coord_flip() + # This switch X and Y axis and allows to get the horizontal version
+    xlab("") +
+    ylab("Dimension 5 scores by mode") 
+
+pm6 <- mdims %>% group_by(mode) %>% 
+  ggplot(aes(x=mode, y=dimension6,fill = mode)) +
+  geom_violin(trim=FALSE) +
+   scale_fill_manual(values=mode_scale) +
+      theme_minimal() +
+    theme(legend.position="none") +
+ stat_summary(fun.data=data_summary, 
+                 geom="pointrange", color="red") +
+      coord_flip() + # This switch X and Y axis and allows to get the horizontal version
+    xlab("") +
+    ylab("Dimension 6 scores by mode") 
+
+pmc6 <- mdims %>% ungroup() %>% 
+ggstatsplot::ggbetweenstats(
+  data = .,
+  x = mode,
+  y = dimension6,
+  notch = TRUE, # show notched box plot
+  mean.plotting = TRUE, # whether mean for each group is to be displayed
+  mean.ci = TRUE, # whether to display confidence interval for means
+  type = "parametric", # which type of test is to be run
+  k = 2,# number of decimal places for statistical results
+  # outlier.tagging = TRUE, # whether outliers need to be tagged
+  # outlier.label = Dimension1, # variable to be used for the outlier tag
+  # # outlier.label.args = list(color = "darkgreen"), # changing the color for the text label
+  xlab = "Corpus", # label for the x-axis variable
+  ylab = "Dimension 6 Scores", # label for the y-axis variable
+  title = "CMC Comparison: Dimension 6",
+    pairwise.comparisons = TRUE, # display results from pairwise comparisons
+    pairwise.display = "significant", # display only significant pairwise comparisons
+    pairwise.annotation = "p.value", # annotate the pairwise comparisons using p-values
+    p.adjust.method = "fdr", # adjust p-values for multiple tests using this method
+ ggtheme = theme_minimal(), # choosing a different theme
+  ggstatsplot.layer = FALSE, # turn off ggstatsplot theme layer
+  # package = "wesanderson", # package from which color palette is to be taken
+  # palette = "Darjeeling1", # choosing a different color palette
+  messages = TRUE) + ## parametic okay!
+  scale_colour_manual(values=mode_scale)
+# Note: Shapiro-Wilk
+
+
+# # option to put all in one plot
+# gridExtra::grid.arrange(pm1,pm2,pm3,pm4,pm5,pm6,nrow=3)
+#  gm <- arrangeGrob(pm1, pm2, pm3,pm4,pm5, pm6, nrow=3)
+# ggsave("Dim-mode-comp.pdf",gm,width=7,height=8,units="in")
+```
+
+
+
+### Boxplots of the dimensions by corpus
+```{r include = FALSE}
+
+
+# dims[] <- lapply(dims[],function(x)gsub("JSC","JOC",x))
+# dims[] <- lapply(dims[],function(x)gsub("HYC","HOC",x))
+# 
+# ## change all columns to numeric as necessary
+# cols.num <- c(2,3,4,5,6,7,8,12,13,14,15,16,17,18,19,20,21,22,23)
+# dims[cols.num] <- sapply(dims[cols.num],as.numeric)
+
+## add the mean DImension scores for each corpus
+
+dims <-  dims %>% group_by(corpus) %>%  
+mutate(mean1 = round(x= mean(dimension1),digits = 2), mean2 = round(x= mean(dimension2),digits = 2), mean3 = round(x= mean(dimension3),digits = 2), mean4 = round(x= mean(dimension4),digits = 2), mean5 = round(x= mean(dimension5),digits = 2), mean6 = round(x= mean(dimension6),digits = 2)) 
+
+dims <-  dims %>% group_by(corpus) %>%  
+mutate(sd1 = round(x= sd(dimension1),digits = 2), sd2 = round(x= sd(dimension2),digits = 2), sd3 = round(x= sd(dimension3),digits = 2), sd4 = round(x= sd(dimension4),digits = 2), sd5 = round(x= sd(dimension5),digits = 2), sd6 = round(x= sd(dimension6),digits = 2)) 
+
+
+matplot(dims, type = c("b"),pch=1,col = unique(12:17)) #plot
+ legend("topleft", legend = 1:4, col=1:4, pch=1) # optional legend
+
+ggplot(data = dims, aes(x=x, y=val)) + geom_line(aes(colour=variable))
+
+
+# lab1w <- stringi::stri_pad_both(label1, width = max(stringi::stri_width(label1)))
+
+# set colour scale discrete scale for mode
+mode_scale <- c("#6baed6", "#bdd7e7", "#eff3ff") # "Blues"
+mode_scale <- c("#7bccc4", "#bae4bc", "#f0f9e8") # "print-friendly blues"
+
+
+# create label values for each dimension
+label1 <-  paste0( "mean = ",dims$mean1, "\nsd = ",dims$sd1) ## on two lines
+label2 <-  paste0( "mean = ",dims$mean2, "\nsd = ",dims$sd2)
+label3 <-  paste0( "mean = ",dims$mean3, "\nsd = ",dims$sd3)
+label4 <-  paste0( "mean = ",dims$mean4, "\nsd = ",dims$sd4)
+label5 <-  paste0( "mean = ",dims$mean5, "\nsd = ",dims$sd5)
+label6 <-  paste0( "mean = ",dims$mean6, "\nsd = ",dims$sd6)
+
+p1 <- dims %>%
+  ggplot( aes(x=corpus, y=dimension1, fill=mode, label = label1)) +
+    geom_violin(width=2.1, size=0.2) +
+    geom_boxplot(width=.2, fill = "white", outlier.shape = NA) +
+   # scale_fill_brewer(palette="Blues") +
+  scale_fill_manual(values=mode_scale) +
+    # viridis::scale_fill_viridis(discrete=TRUE) +
+    # viridis::scale_color_viridis(discrete=TRUE) +
+    theme_minimal() +
+    theme(legend.position="none") +
+    coord_flip() + # This switch X and Y axis and allows to get the horizontal version
+    xlab("") +
+    ylab("Dimension 1 Scores (all texts)") +
+    ylim(-35,71) +
+ geom_label(aes(x=corpus, y= 56,   hjust=0,vjust =0.5),size= 3,family = "mono")
+
+p2 <- dims %>%
+  ggplot( aes(x=corpus, y=dimension2, fill=mode,label = label2)) +
+    geom_violin(width=2.1, size=0.2) +
+  geom_boxplot(width=.2, fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values=mode_scale) +
+    # viridis::scale_fill_viridis(discrete=TRUE) +
+    # viridis::scale_color_viridis(discrete=TRUE) +
+    theme_minimal() +
+    theme(legend.position="none") +
+    coord_flip() + # This switch X and Y axis and allows to get the horizontal version
+    xlab("") +
+    ylab("Dimension 2 Scores (all texts)") +
+    ylim(-10,20) +
+    geom_label(aes(x=corpus, y= 15,hjust=0,vjust =0.5),size= 3,family = "mono")
+
+
+p3 <- dims %>%
+  ggplot( aes(x=corpus, y=dimension3, fill=mode,label = label3)) +
+    geom_violin(width=2.1, size=0.2) +
+  geom_boxplot(width=.2, fill = "white", outlier.shape = NA) +
+   scale_fill_manual(values=mode_scale) +
+  # scale_fill_brewer(palette="Blues") +
+    # viridis::scale_fill_viridis(discrete=TRUE) +
+    # viridis::scale_color_viridis(discrete=TRUE) +
+    theme_minimal() +
+    theme(legend.position="none") +
+    coord_flip() +
+    xlab("") +
+    ylab("Dimension 3 Scores (all texts)") +
+    ylim(-20,25) +
+    geom_label(aes(x=corpus, y= 18,hjust=0,vjust =0.5),size= 3,family = "mono")
+
+p4 <- dims %>%
+  ggplot( aes(x=corpus, y=dimension4, fill=mode, label = label4)) +
+    geom_violin(width=2.1, size=0.2) +
+  geom_boxplot(width=.2, fill = "white", outlier.shape = NA) +
+    scale_fill_manual(values=mode_scale) +
+   # scale_fill_brewer(palette="Blues") +  
+  # viridis::scale_fill_viridis(discrete=TRUE) +
+    # viridis::scale_color_viridis(discrete=TRUE) +
+    theme_minimal() +
+    theme(legend.position="none") +
+    coord_flip() + 
+    xlab("") +
+    ylab("Dimension 4 Scores (all texts)") +
+    ylim(-10,25) +
+    geom_label(aes(x=corpus, y= 18,hjust=0,vjust =0.5),size= 3,family = "mono")
+
+
+p5 <- dims %>%
+  ggplot( aes(x=corpus, y=dimension5, fill=mode,label = label5)) +
+    geom_violin(width=2.1, size=0.2) +
+  geom_boxplot(width=.2, fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values=mode_scale) +
+  # scale_fill_brewer(palette="Blues") +
+    # viridis::scale_fill_viridis(discrete=TRUE) +
+    # viridis::scale_color_viridis(discrete=TRUE) +
+    theme_minimal() +
+    theme(legend.position="none") +
+    coord_flip() +
+    xlab("") +
+    ylab("Dimension 5 Scores (all texts)")  +
+    ylim(-5,15)  +
+    geom_label(aes(x=corpus, y= 10,hjust=0,vjust =0.5),size= 3,family = "mono")
+
+p6 <- dims %>%
+  ggplot( aes(x=corpus, y=dimension6, fill=mode, label = label6)) +
+    geom_violin(width=2.1, size=0.2) +
+  geom_boxplot(width=.2, fill = "white", outlier.shape = NA) +
+   scale_fill_manual(values=mode_scale) +
+  # scale_fill_brewer(palette="Blues") +
+    # viridis::scale_fill_viridis(discrete=TRUE) +
+    # viridis::scale_color_viridis(discrete=TRUE) +
+    theme_minimal() +
+    theme(legend.position="none") +
+    coord_flip() +
+    xlab("") +
+    ylab("Dimension 6 Scores (all texts)") +
+    ylim(-5,10) +
+    geom_label(aes(x=corpus, y= 7,hjust=0,vjust =0.5),size= 3,family = "mono")
+
+## option to put all in one plot (not taken)
+# gridExtra::grid.arrange(p1,p2,p3,p4,p5,p6,nrow=3)
+#  g <- arrangeGrob(p1, p2, p3,p4,p5, p6, nrow=3)
+
+
+
+## create a filteres version
+ # filter > 800 and add the mean and SD Dmmension scores for each corpus
+dimsf <-  dims %>% filter(wordcount > 799) %>% group_by(corpus) %>%  mutate(mean1f = round(x= mean(dimension1),digits = 2), mean2f = round(x= mean(dimension2),digits = 2), mean3f = round(x= mean(dimension3),digits = 2), mean4f = round(x= mean(dimension4),digits = 2), mean5f = round(x= mean(dimension5),digits = 2), mean6f = round(x= mean(dimension6),digits = 2)) 
+
+dimsf <-  dimsf %>% group_by(corpus) %>%  
+mutate(sd1 = round(x= sd(dimension1),digits = 2), sd2 = round(x= sd(dimension2),digits = 2), sd3 = round(x= sd(dimension3),digits = 2), sd4 = round(x= sd(dimension4),digits = 2), sd5 = round(x= sd(dimension5),digits = 2), sd6 = round(x= sd(dimension6),digits = 2)) 
+
+# create label values for each dimension
+label1f <-  paste0( "mean = ",dimsf$mean1, "\nsd = ",dimsf$sd1) ## on two lines
+label2f<-  paste0( "mean = ",dimsf$mean2, "\nsd = ",dimsf$sd2)
+label3f <-  paste0( "mean = ",dimsf$mean3, "\nsd = ",dimsf$sd3)
+label4f <-  paste0( "mean = ",dimsf$mean4, "\nsd = ",dimsf$sd4)
+label5f <-  paste0( "mean = ",dimsf$mean5, "\nsd = ",dimsf$sd5)
+label6f <-  paste0( "mean = ",dimsf$mean6, "\nsd = ",dimsf$sd6)
+
+## make all labels the same width
+same_width <- function(x){
+  x <- stringi::stri_pad_both(x, width = max(stringi::stri_width(x)))
+}
+label1f <- same_width(label1f)
+label2f <- same_width(label2f)
+label3f <- same_width(label3f)
+label4f <- same_width(label4f)
+label5f <- same_width(label5f)
+label6f <- same_width(label6f)
+
+
+## boxplots with wordcount set at 800
+pf1 <- dimsf %>%
+  ggplot( aes(x=corpus, y=dimension1, fill=mode, label = label1f)) +
+    geom_violin(width=2.1, size=0.2) +
+    geom_boxplot(width=.2, fill = "white", outlier.shape = NA) +
+   # scale_fill_brewer(palette="Blues") +
+  scale_fill_manual(values=mode_scale) +
+    # viridis::scale_fill_viridis(discrete=TRUE) +
+    # viridis::scale_color_viridis(discrete=TRUE) +
+    theme_minimal() +
+    theme(legend.position="none") +
+    coord_flip() + # This switch X and Y axis and allows to get the horizontal version
+    xlab("") +
+    ylab("Dimension 1 Scores (all texts)") +
+    ylim(-35,71) +
+ geom_label(aes(x=corpus, y= 56,   hjust=0,vjust =0.5),size= 3,family = "mono")
+
+pf2 <- dimsf %>%
+  ggplot( aes(x=corpus, y=dimension2, fill=mode,label = label2f)) +
+    geom_violin(width=2.1, size=0.2) +
+  geom_boxplot(width=.2, fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values=mode_scale) +
+    # viridis::scale_fill_viridis(discrete=TRUE) +
+    # viridis::scale_color_viridis(discrete=TRUE) +
+    theme_minimal() +
+    theme(legend.position="none") +
+    coord_flip() + # This switch X and Y axis and allows to get the horizontal version
+    xlab("") +
+    ylab("Dimension 2 Scores (all texts)") +
+    ylim(-10,20) +
+    geom_label(aes(x=corpus, y= 15,hjust=0,vjust =0.5),size= 3,family = "mono")
+
+
+pf3 <- dimsf %>%
+  ggplot( aes(x=corpus, y=dimension3, fill=mode,label = label3f)) +
+    geom_violin(width=2.1, size=0.2) +
+  geom_boxplot(width=.2, fill = "white", outlier.shape = NA) +
+   scale_fill_manual(values=mode_scale) +
+  # scale_fill_brewer(palette="Blues") +
+    # viridis::scale_fill_viridis(discrete=TRUE) +
+    # viridis::scale_color_viridis(discrete=TRUE) +
+    theme_minimal() +
+    theme(legend.position="none") +
+    coord_flip() +
+    xlab("") +
+    ylab("Dimension 3 Scores (all texts)") +
+    ylim(-20,25) +
+    geom_label(aes(x=corpus, y= 18,hjust=0,vjust =0.5),size= 3,family = "mono")
+
+pf4 <- dimsf %>%
+  ggplot( aes(x=corpus, y=dimension4, fill=mode, label = label4f)) +
+    geom_violin(width=2.1, size=0.2) +
+  geom_boxplot(width=.2, fill = "white", outlier.shape = NA) +
+    scale_fill_manual(values=mode_scale) +
+   # scale_fill_brewer(palette="Blues") +  
+  # viridis::scale_fill_viridis(discrete=TRUE) +
+    # viridis::scale_color_viridis(discrete=TRUE) +
+    theme_minimal() +
+    theme(legend.position="none") +
+    coord_flip() + 
+    xlab("") +
+    ylab("Dimension 4 Scores (all texts)") +
+    ylim(-10,25) +
+    geom_label(aes(x=corpus, y= 18,hjust=0,vjust =0.5),size= 3,family = "mono")
+
+
+pf5 <- dimsf %>%
+  ggplot( aes(x=corpus, y=dimension5, fill=mode,label = label5f)) +
+    geom_violin(width=2.1, size=0.2) +
+  geom_boxplot(width=.2, fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values=mode_scale) +
+  # scale_fill_brewer(palette="Blues") +
+    # viridis::scale_fill_viridis(discrete=TRUE) +
+    # viridis::scale_color_viridis(discrete=TRUE) +
+    theme_minimal() +
+    theme(legend.position="none") +
+    coord_flip() +
+    xlab("") +
+    ylab("Dimension 5 Scores (all texts)")  +
+    ylim(-5,15)  +
+    geom_label(aes(x=corpus, y= 10,hjust=0,vjust =0.5),size= 3,family = "mono")
+
+pf6 <- dimsf %>%
+  ggplot( aes(x=corpus, y=dimension6, fill=mode, label = label6f)) +
+    geom_violin(width=2.1, size=0.2) +
+  geom_boxplot(width=.2, fill = "white", outlier.shape = NA) +
+   scale_fill_manual(values=mode_scale) +
+  scale_x_discrete(expand = c(0,2)) +
+  # scale_fill_brewer(palette="Blues") +
+    # viridis::scale_fill_viridis(discrete=TRUE) +
+    # viridis::scale_color_viridis(discrete=TRUE) +
+    theme_minimal() +
+    theme(legend.position="none") +
+    coord_flip() +
+    xlab("") +
+    ylab("Dimension 6 Scores (all texts)") +
+    ylim(-5,10) +
+    annotate("label",x=dimsf$corpus, y= 7,hjust=0,label = label6f,size= 3,family = "mono")
+
+
+  
+
+# ## plot all the dimensions in a list
+#  all_plots <- lapply(Dims_for_plot,plot_dims)
+#  all_plots[["ACA"]]
+#  ### in case you want to arrange plots into a grid
+#  ### gridExtra::grid.arrange(all_plots[[4]],all_plots[[5]], ncol = 2)
+  
+## function to set plot dimensions
+  set_plot_dimensions <- function(width_choice, height_choice) {
+        options(repr.plot.width=width_choice, repr.plot.height=height_choice)
+        }
+  ## set plot dimensions here ####
+  set_plot_dimensions(6,8)
+  
+  
+  ## combine all texts plots with >800 text plots
+  library(gridExtra)
+  
+  #  gridExtra::grid.arrange(p1,pf1,nrow=2) 
+    g1 <- arrangeGrob(p1, pf1, nrow=2)
+#    gridExtra::grid.arrange(p2,pf2,nrow=2)
+    g2 <- arrangeGrob(p2, pf2, nrow=2)
+  #  gridExtra::grid.arrange(p3,pf3,nrow=2)
+    g3 <- arrangeGrob(p3, pf3, nrow=2)
+  #  gridExtra::grid.arrange(p4,pf4,nrow=2)
+    g4 <- arrangeGrob(p4, pf4, nrow=2)
+ #   gridExtra::grid.arrange(p5,pf5,nrow=2)
+    g5 <- arrangeGrob(p5, pf5, nrow=2)
+ #   gridExtra::grid.arrange(p6,pf6,nrow=2)
+    g6 <- arrangeGrob(p6, pf6, nrow=2)
+    
+    
+    
+    ggsave("Dim-1-Comp.pdf",g1,width=7,height=8,units="in")
+    ggsave("Dim-2-Comp.pdf",g2,width=7,height=8,units="in")
+    ggsave("Dim-3-Comp.pdf",g3,width=7,height=8,units="in")
+    ggsave("Dim-4-Comp.pdf",g4,width=7,height=8,units="in")
+    ggsave("Dim-5-Comp.pdf",g5,width=7,height=8,units="in")
+    ggsave("Dim-6-Comp.pdf",g6,width=7,height=8,units="in")
+```
+
+
+## ANOVA comparing the HYC and JUC corpora
+FOr this procedure, we take the dimesion columns for all the texts in both corpora, and conduct an ANOVA as point of analysis.
+
+```{r cars}
+## Fina the dimesnion scores for JUC and HYC - method 1 find the file and compile
+
+# cmcfiles <- paste0(DimFolder,"/", myfiles[1:2])
+# cmc_list <- l_dims <- lapply(cmcfiles, read_delim, delim = "\t")
+# 
+# cmc_compare <- do.call(bind_rows,cmc_list)
+# ## add a corpus variable
+# cmc_compare$corpus <- gsubfn("([A-Z]{3}).*","\\1",cmc_compare$Filename)
+# ## remove corpus total rows
+# cmc_compare_total <- cmc_compare[ which(cmc_compare$corpus=='COR'), ]
+# cmc_compare <- cmc_compare[ which(cmc_compare$corpus!='COR'), ]
+# names(cmc_compare_total)[names(cmc_compare_total) == 'Filename'] <- 'Corpus'
+# 
+# cmc_compare_total$Filename <- unique(cmc_compare$corpus)
+# cmc_compare_total %>% select(-corpus) -> cmc_compare_total
+#  cmc_compare$corpus <- as.factor(cmc_compare$corpus) 
+# cmc_d1 <- cmc_compare %>% select(corpus,Dimension1)
+# cmc_d2 <- cmc_compare %>% select(corpus,Dimension2)
+# cmc_d3 <- cmc_compare %>% select(corpus,Dimension3)
+# cmc_d4 <- cmc_compare %>% select(corpus,Dimension4)
+# cmc_d5 <- cmc_compare %>% select(corpus,Dimension5)
+# cmc_d6 <- cmc_compare %>% select(corpus,Dimension6)
+
+## method 2 -> from filtered dims file
+
+cdims <- dimsf %>% filter( mode == "ACMC") %>% ungroup()
+cdims$corpus <- factor(cdims$corpus, levels=c("HOC","JOC"))
+
+##Dimension 1
+# p1 <- ggboxplot(cmc_d1, x = "corpus", y = "Dimension1",fill="corpus", alpha =0.5) +
+#         stat_compare_means(method = "mann")  + # p-value 
+#         geom_jitter(position = position_jitter(0.5), 
+#                     aes(colour = corpus),
+#                     cex = 0.8) +
+#                     theme_minimal() +
+#                     theme(legend.position = "none")
+#                    
+# ##Dimension 2
+# p2 <- ggboxplot(cmc_d2, x = "corpus", y = "Dimension2",fill="corpus", alpha =0.5) +
+#         stat_compare_means(method = "wilcox")  + # p-value 
+#         geom_jitter(position = position_jitter(0.5), 
+#                     aes(colour = corpus),
+#                     cex = 0.8) +
+#                     theme_minimal() +
+#                     theme(legend.position = "none")
+# ##Dimension 3
+# p3 <- ggboxplot(cmc_d3, x = "corpus", y = "Dimension3",fill="corpus", alpha =0.5) +
+#         stat_compare_means(method = "wilcox")  + # p-value 
+#         geom_jitter(position = position_jitter(0.5), 
+#                     aes(colour = corpus),
+#                     cex = 0.8) +
+#                     theme_minimal() +
+#                     theme(legend.position = "none")
+# ##Dimension 4
+# p4 <- ggboxplot(cmc_d4, x = "corpus", y = "Dimension4",fill="corpus", alpha =0.5) +
+#         stat_compare_means(method = "wilcox")  + # p-value 
+#         geom_jitter(position = position_jitter(0.5), 
+#                     aes(colour = corpus),
+#                     cex = 0.8) +
+#                     theme_minimal() +
+#                     theme(legend.position = "none")
+#              
+# ##Dimension 3
+# p5 <- ggboxplot(cmc_d5, x = "corpus", y = "Dimension5",fill="corpus", alpha =0.5) +
+#         stat_compare_means(method = "wilcox")  + # p-value 
+#         geom_jitter(position = position_jitter(0.5), 
+#                     aes(colour = corpus),
+#                     cex = 0.8) +
+#                     theme_minimal() +
+#                     theme(legend.position = "none")
+# 
+# ##Dimension 6
+# p6 <- ggboxplot(cmc_d6, x = "corpus", y = "Dimension6",fill="corpus", alpha =0.5) +
+#         stat_compare_means(method = "wilcox")  + # p-value 
+#         geom_jitter(position = position_jitter(0.5), 
+#                     aes(colour = corpus),
+#                     cex = 0.8) +
+#                     theme_minimal() +
+#                     theme(legend.position = "none")
+# 
+# p_all <- gridExtra::grid.arrange(p1,p2,p3,p4,p5,p6,ncol=2,nrow=3)
+
+# ## calculate the effect sizes
+# library(rcompanion)
+# 
+# rcompanion::wilcoxonR(x  = cmc_d1$corpus,
+#           g  = cmc_d1$Dimension1,
+#           ci = TRUE)
+# 
+# library(DescTools)
+# 
+# eff1 <- DescTools::KendallTauB(x = cmc_d1$corpus,
+#             y = cmc_d1$Dimension1,
+#             conf.level = 0.95)
+# 
+# eff2 <- DescTools::KendallTauB(x = cmc_d2$corpus,
+#             y = cmc_d2$Dimension2,
+#             conf.level = 0.95)
+# 
+
+```
+
+
+# Try ggstatsplot
+
+```{r}
+c1 <- ggstatsplot::ggbetweenstats(
+  data = cdims,
+  x = corpus,
+  y = dimension1,
+  notch = TRUE, # show notched box plot
+  mean.plotting = TRUE, # whether mean for each group is to be displayed
+  mean.ci = TRUE, # whether to display confidence interval for means
+  type = "parametric", # which type of test is to be run
+  k = 2, # number of decimal places for statistical results
+  # outlier.tagging = TRUE, # whether outliers need to be tagged
+  # outlier.label = Dimension1, # variable to be used for the outlier tag
+  # # outlier.label.args = list(color = "darkgreen"), # changing the color for the text label
+  xlab = "Corpus", # label for the x-axis variable
+  ylab = "Dimension 1 Scores", # label for the y-axis variable
+  title = "CMC Comparison: Dimension 1", # title text for the plot
+  ggtheme = ggthemes::theme_fivethirtyeight(), # choosing a different theme
+  ggstatsplot.layer = FALSE, # turn off ggstatsplot theme layer
+  package = "wesanderson", # package from which color palette is to be taken
+  palette = "Darjeeling1", # choosing a different color palette
+  messages = TRUE) ## parametic okay!
+# Note: Shapiro-Wilk Normality Test for Dimension 1 Scores: p-value = < 0.001
+# Note: Bartlett's test for homogeneity of variances for factor Corpus: p-value = < 0.001
+
+
+c2 <- ggstatsplot::ggbetweenstats(
+  data = cdims,
+  x = corpus,
+  y = dimension2,
+  notch = TRUE, # show notched box plot
+  mean.plotting = TRUE, # whether mean for each group is to be displayed
+  mean.ci = TRUE, # whether to display confidence interval for means
+  type = "non-parametric", # which type of test is to be run
+  k = 2, # number of decimal places for statistical results
+  # outlier.tagging = TRUE, # whether outliers need to be tagged
+  # outlier.label = Dimension1, # variable to be used for the outlier tag
+  # # outlier.label.args = list(color = "darkgreen"), # changing the color for the text label
+  xlab = "Corpus", # label for the x-axis variable
+  ylab = "Dimension 2 Scores", # label for the y-axis variable
+  title = "CMC Comparison: Dimension 2", # title text for the plot
+  ggtheme = ggthemes::theme_fivethirtyeight(), # choosing a different theme
+  ggstatsplot.layer = FALSE, # turn off ggstatsplot theme layer
+  package = "wesanderson", # package from which color palette is to be taken
+  palette = "Darjeeling1", # choosing a different color palette
+  messages = TRUE) # non-parametric
+# Note: Shapiro-Wilk Normality Test for Dimension 2 Scores: p-value = < 0.001
+# Note: Bartlett's test for homogeneity of variances for factor Corpus: p-value = 0.319
+
+
+c3 <- ggstatsplot::ggbetweenstats(
+  data = cdims,
+  x = corpus,
+  y = dimension3,
+  notch = TRUE, # show notched box plot
+  mean.plotting = TRUE, # whether mean for each group is to be displayed
+  mean.ci = TRUE, # whether to display confidence interval for means
+  type = "non-parametric", # which type of test is to be run
+  k = 2, # number of decimal places for statistical results
+  # outlier.tagging = TRUE, # whether outliers need to be tagged
+  # outlier.label = Dimension1, # variable to be used for the outlier tag
+  # # outlier.label.args = list(color = "darkgreen"), # changing the color for the text label
+  xlab = "Corpus", # label for the x-axis variable
+  ylab = "Dimension 3 Scores", # label for the y-axis variable
+  title = "CMC Comparison: Dimension 3", # title text for the plot
+  ggtheme = ggthemes::theme_fivethirtyeight(), # choosing a different theme
+  ggstatsplot.layer = FALSE, # turn off ggstatsplot theme layer
+  package = "wesanderson", # package from which color palette is to be taken
+  palette = "Darjeeling1", # choosing a different color palette
+  messages = TRUE # non-p
+)
+# Note: Shapiro-Wilk Normality Test for Dimension 3 Scores: p-value = 0.115
+# Note: Bartlett's test for homogeneity of variances for factor Corpus: p-value = 0.169
+
+c4 <- ggstatsplot::ggbetweenstats(
+  data = cdims,
+  x = corpus,
+  y = dimension4,
+  notch = TRUE, # show notched box plot
+  mean.plotting = TRUE, # whether mean for each group is to be displayed
+  mean.ci = TRUE, # whether to display confidence interval for means
+  type = "non-parametric", # which type of test is to be run
+  k = 2, # number of decimal places for statistical results
+  # outlier.tagging = TRUE, # whether outliers need to be tagged
+  # outlier.label = Dimension1, # variable to be used for the outlier tag
+  # # outlier.label.args = list(color = "darkgreen"), # changing the color for the text label
+  xlab = "Corpus", # label for the x-axis variable
+  ylab = "Dimension 4 Scores", # label for the y-axis variable
+  title = "CMC Comparison: Dimension 4", # title text for the plot
+  ggtheme = ggthemes::theme_fivethirtyeight(), # choosing a different theme
+  ggstatsplot.layer = FALSE, # turn off ggstatsplot theme layer
+  package = "wesanderson", # package from which color palette is to be taken
+  palette = "Darjeeling1", # choosing a different color palette
+  messages = TRUE # non-p
+)
+# Note: Shapiro-Wilk Normality Test for Dimension 4 Scores: p-value = 0.735
+# Note: Bartlett's test for homogeneity of variances for factor Corpus: p-value = 0.002
+
+c5 <- ggstatsplot::ggbetweenstats(
+  data = cdims,
+  x = corpus,
+  y = dimension5,
+  notch = TRUE, # show notched box plot
+  mean.plotting = TRUE, # whether mean for each group is to be displayed
+  mean.ci = TRUE, # whether to display confidence interval for means
+  type = "non-parametric", # which type of test is to be run
+  k = 2, # number of decimal places for statistical results
+  # outlier.tagging = TRUE, # whether outliers need to be tagged
+  # outlier.label = Dimension1, # variable to be used for the outlier tag
+  # # outlier.label.args = list(color = "darkgreen"), # changing the color for the text label
+  xlab = "Corpus", # label for the x-axis variable
+  ylab = "Dimension 5 Scores", # label for the y-axis variable
+  title = "CMC Comparison: Dimension 5", # title text for the plot
+  ggtheme = ggthemes::theme_fivethirtyeight(), # choosing a different theme
+  ggstatsplot.layer = FALSE, # turn off ggstatsplot theme layer
+  package = "wesanderson", # package from which color palette is to be taken
+  palette = "Darjeeling1", # choosing a different color palette
+  messages = TRUE # non-p
+)
+# Note: Shapiro-Wilk Normality Test for Dimension 5 Scores: p-value = < 0.001
+# Note: Bartlett's test for homogeneity of variances for factor Corpus: p-value = 0.919
+
+c6 <- ggstatsplot::ggbetweenstats(
+  data = cdims,
+  x = corpus,
+  y = dimension6,
+  notch = TRUE, # show notched box plot
+  mean.plotting = TRUE, # whether mean for each group is to be displayed
+  mean.ci = TRUE, # whether to display confidence interval for means
+  type = "parametric", # which type of test is to be run
+  k = 2, # number of decimal places for statistical results
+  # outlier.tagging = TRUE, # whether outliers need to be tagged
+  # outlier.label = Dimension1, # variable to be used for the outlier tag
+  # # outlier.label.args = list(color = "darkgreen"), # changing the color for the text label
+  xlab = "Corpus", # label for the x-axis variable
+  ylab = "Dimension 6 Scores", # label for the y-axis variable
+  title = "CMC Comparison: Dimension 6", # title text for the plot
+  ggtheme = ggthemes::theme_fivethirtyeight(), # choosing a different theme
+  ggstatsplot.layer = FALSE, # turn off ggstatsplot theme layer
+  package = "wesanderson", # package from which color palette is to be taken
+  palette = "Darjeeling1", # choosing a different color palette
+  messages = TRUE # parametric okay
+)
+# Note: Shapiro-Wilk Normality Test for Dimension 6 Scores: p-value = < 0.001
+# Note: Bartlett's test for homogeneity of variances for factor Corpus: p-value = < 0.001
+
+ggsave("Dim-1-CMC-comp.pdf",c1,width=7,height=8,units="in")
+ggsave("Dim-2-CMC-comp.pdf",c2,width=7,height=8,units="in")
+ggsave("Dim-3-CMC-comp.pdf",c3,width=7,height=8,units="in")
+ggsave("Dim-4-CMC-comp.pdf",c4,width=7,height=8,units="in")
+ggsave("Dim-5-CMC-comp.pdf",c5,width=7,height=8,units="in")
+ggsave("Dim-6-CMC-comp.pdf",c6,width=7,height=8,units="in")
+
+```
+
+
+
+## Dimension 6
+Factor 6 contains three types of dependent clauses: that-complement clauses on verbs, that-complement clauses on adjectives, that-relative clauses on object position. These are features of structural elaboration which co-occur in this factor with informational features like demonstrative pronouns or stranded prepositions. Conrad therefore argues, that registers with positive scores are informational spoken registers - spontaneous as well as prepared speeches – which make use of these clauses to express personal attitudes (cf. Conrad and Biber 2001: 39). Biber (1988) found the co-occurence patterns among features associated with this dimension "surprising" with some infomrational functions included among both the positive and negative loadings, while at the same time typically written features appear to co-occur with more colloquial features such as demonstrative pronouns.
+Features grouped on this dimension "enable a direct encoding of attitude or stance in addition to their use for informational elaboration" [p 159]
+Primary - informational elaboration under real-time production constraints.
+AN important secondary use of thse features - the expression of opinions, attitudes, or personal statements.
+Collaborated by BNC findings - NEWS corpus:
+
+NWS NWS-K5C-040 6.55 "Town allergies Professor A Seaton suggests (Points of View, today) that the Rev J L Leckie's view that traffic pollution has caused the rise in the prevalence of asthma in Aberdeen school-children is simplistic. But Mr Leckie must be partly right. Professor Robert Davies, of Bart's, has pointed out that exhaust pollution explains the curious fact that city dwellers these days are more affected by hay fever than those in the country. Both these allergic conditions have the same underlying cause: a dysfunctioning immune system. Therefore all immunosuppressive factors can play a part. These include chemical allergens (exhaust fumes and tobacco smoke among them), food allergens (too often overlooked by asthma specialists), and physical and psychological stress. Their effects are cumulative; there is no single answer in cell-mediated allergy."
+
+```{r pressure, echo=FALSE}
+## find the high and lows as exemplaries
+hi_dim6 <- dims %>%
+  group_by(corpus) %>% 
+  top_n(10, dimension6)
+
+hi_dim6[] <- lapply(hi_dim6[],function(x)gsub("JSC","JOC",x))
+hi_dim6[] <- lapply(hi_dim6[],function(x)gsub("HYC","HOC",x))
+
+text_df <- read_delim("/Users/Tim/Documents/00_R projects/Corpus text selection/2020-03-06_all_texts_df.txt",delim ="\t",col_names = TRUE, quote="")
+
+left_join(hi_dim6,text_df) %>% select(text_id,dimension6,text) ->hi_dim6
+output <- getwd()
+write_delim(hi_dim6,paste0(output,today,"high_MAT_dim6_texts.txt",delim ="\t"))
+
+dimst <- dims  %>%  filter(wordcount > 799)
+
+dimst[] <- lapply(dimst[],function(x)gsub("JSC","JOC",x))
+dimst[] <- lapply(dimst[],function(x)gsub("HYC","HOC",x))
+
+hi_dim1 <- dimst %>%
+  group_by(corpus) %>% 
+  top_n(10, dimension1)
+left_join(hi_dim1,text_df) %>% select(text_id,dimension1,text) ->hi_dim1
+write_delim(hi_dim1,paste0(OutputFolder,today,"high_MAT_dim1_texts.txt",delim ="\t"))
+
+lo_dim1 <- dimst %>%
+  group_by(corpus) %>% 
+  top_n(-10, dimension1)
+left_join(lo_dim1,text_df) %>% select(text_id,dimension1,text) ->lo_dim1
+write_delim(lo_dim1,paste0(OutputFolder,today,"low_MAT_dim1_texts.txt",delim ="\t"))
+
+hi_dim2 <- dimst %>%
+  group_by(corpus) %>% 
+  top_n(10, dimension2)
+left_join(hi_dim2,text_df) %>% select(text_id,dimension2,text) ->hi_dim2
+write_delim(hi_dim2,paste0(OutputFolder,today,"high_MAT_dim2_texts.txt",delim ="\t"))
+
+lo_dim2 <- dimst %>%
+  group_by(corpus) %>% 
+  top_n(-10, dimension2)
+left_join(lo_dim2,text_df) %>% select(text_id,dimension2,text) ->lo_dim2
+write_delim(lo_dim2,paste0(OutputFolder,today,"low_MAT_dim2_texts.txt",delim ="\t"))
+
+hi_dim3 <- dimst %>%
+  group_by(corpus) %>% 
+  top_n(10, dimension3)
+left_join(hi_dim3,text_df) %>% select(text_id,dimension3,text) ->hi_dim3
+write_delim(hi_dim3,paste0(OutputFolder,today,"high_MAT_dim3_texts.txt",delim ="\t"))
+
+lo_dim3 <- dimst %>%
+  group_by(corpus) %>% 
+  top_n(-10, dimension3)
+left_join(lo_dim3,text_df) %>% select(text_id,dimension3,text) ->lo_dim3
+write_delim(lo_dim3,paste0(OutputFolder,today,"low_MAT_dim3_texts.txt",delim ="\t"))
+
+hi_dim4 <- dimst %>%
+  group_by(corpus) %>% 
+  top_n(10, dimension4)
+left_join(hi_dim4,text_df) %>% select(text_id,dimension4,text) ->hi_dim4
+write_delim(hi_dim4,paste0(OutputFolder,today,"high_MAT_dim4_texts.txt",delim ="\t"))
+
+lo_dim4 <- dimst %>%
+  group_by(corpus) %>% 
+  top_n(-10, dimension4)
+left_join(lo_dim4,text_df) %>% select(text_id,dimension4,text) ->lo_dim4
+write_delim(lo_dim4,paste0(OutputFolder,today,"low_MAT_dim4_texts.txt",delim ="\t"))
+
+hi_dim5 <- dimst %>%
+  group_by(corpus) %>% 
+  top_n(10, dimension5)
+left_join(hi_dim5,text_df) %>% select(text_id,dimension5,text) ->hi_dim5
+write_delim(hi_dim5,paste0(OutputFolder,today,"high_MAT_dim5_texts.txt",delim ="\t"))
+
+lo_dim5 <- dimst %>%
+  group_by(corpus) %>% 
+  top_n(-10, dimension5)
+left_join(lo_dim5,text_df) %>% select(text_id,dimension5,text) ->lo_dim5
+write_delim(lo_dim5,paste0(OutputFolder,today,"low_MAT_dim5_texts.txt",delim ="\t"))
+
+hi_dim6 <- dimst %>%
+  group_by(corpus) %>% 
+  top_n(10, dimension6)
+left_join(hi_dim6,text_df) %>% select(text_id,dimension6,text) ->hi_dim6
+write_delim(hi_dim6,paste0(OutputFolder,today,"high_MAT_dim6_texts.txt",delim ="\t"))
+
+lo_dim6 <- dimst %>%
+  group_by(corpus) %>% 
+  top_n(-10, dimension6)
+left_join(lo_dim6,text_df) %>% select(text_id,dimension6,text) ->lo_dim6
+write_delim(lo_dim6,paste0(OutputFolder,today,"low_MAT_dim6_texts.txt",delim ="\t"))
+
+hi_dims_id <- list(hi_dim1$text_id, hi_dim2$text_id, hi_dim3$text_id, 
+                     hi_dim4$text_id, hi_dim5$text_id, hi_dim6$text_id)
+
+lo_dims_id <- list(lo_dim1$text_id, lo_dim2$text_id, lo_dim3$text_id, 
+                     lo_dim4$text_id, lo_dim5$text_id, lo_dim6$text_id)
+```
+
+## Have a look at the Dimension stats variables 
+This next part, let's try a logisitc regression between the two corpora, to see which Dimension most strongly defines each CMC corpus
+
+```{r}
+
+#Get the tags from the spreadsheet
+# copy and paste... note [[1]] returns character strings directly
+tag1 <- read.table(pipe("pbpaste"), sep="\t", header=F,stringsAsFactors = FALSE)[[1]]
+tag2 <- read.table(pipe("pbpaste"), sep="\t", header=F,stringsAsFactors = FALSE)[[1]]
+tag3 <- read.table(pipe("pbpaste"), sep="\t", header=F,stringsAsFactors = FALSE)[[1]]
+tag4 <- read.table(pipe("pbpaste"), sep="\t", header=F,stringsAsFactors = FALSE)[[1]]
+tag5 <- read.table(pipe("pbpaste"), sep="\t", header=F,stringsAsFactors = FALSE)[[1]]
+tag6 <- read.table(pipe("pbpaste"), sep="\t", header=F,stringsAsFactors = FALSE)[[1]]
+
+taglist <- list(tag1,tag2,tag3,tag4,tag5,tag6)
+taglist <- lapply(taglist,function(x) c(x,"text_id","wordcount","corpus"))
+
+dimtag_stats <- lapply(taglist,function(x) stats[names(stats) %in% x])
+
+dimTag1_mean<- dimtag_stats[[1]] %>% 
+  group_by(corpus) %>% 
+  summarise_if(is.numeric,list(mean = mean))
+
+write_csv(dimTag1,paste0(today,"corpus_dim1_tags.csv"))
+
+```
+
+## create horizontal bar charts to identify which features are particularly outstanding in comparing the learner and expert copora
+
+We can use the odds ratio to determine the relative difference between two frequency values. 
+Cf. Log ratio Hardie
+
+However, if we look at figure xx, it is clear that log ratio alone does not account for why the learner corpus has a much higher score than the BBC corpus - we also need to consider the absolute differences. For example, 
+```{r}
+
+  ### tidy way to create the logodds values
+ ## iterate in a loop
+lodds_list <- NULL
+for( i in 1:length(dimtag_stats)){
+  # take the first element from the list , omitting the wordcount column
+  lodds<- dimtag_stats[[i]][,-2] %>% 
+  group_by(corpus) %>%  
+  summarise_if(is.numeric,list(mean = mean)) %>% # summarise only the numerical variables
+filter(corpus == "HOC" | corpus == "JOC") %>% # select the CMC for comparison
+ pivot_longer(-corpus, names_sep = "_", names_to = c("tag","stat"), values_to = "mean") %>% #change the column variables to rows
+  pivot_wider(names_from = corpus, values_from = mean) %>% # change the corpus rows to column variables
+  select(-stat) %>% # remove unnecessay columns
+  mutate(logodds = log2(HOC/JOC))
+  lodds_list[[i]] <-  lodds
+}
+
+# copy tags with negative loadings from spreadsheet
+neg <- read.table(pipe("pbpaste"), sep="\t", header=F,stringsAsFactors = FALSE)[[1]]
+dput(neg) # c("nn", "awl", "pin", "ttr", "jj", "time", "place", "rb")
+
+tagful <-read.table(pipe("pbpaste"), sep="\t", header=T,stringsAsFactors = FALSE)[]
+dput(tagful$tag) # c("priv", "thatd", "cont", "vprt", "spp2", "prod", "xx0", "demp", "emph", "fpp1", "pit", "bema", "caus", "dpar", "inpr", "hdg", "amp", "sere", "whqu", "pomd", "andc", "whcl", "stpr", "nn", "awl", "pin", "ttr", "jj", "vbd", "tpp3", "peas", "pubv", "syne", "presp", "pire", "whobj", "whsub", "nomz", "phc", "place", "rb", "time", "in", "prmd", "suav", "cond", "nemd", "spau", "conj", "osub", "bypa", "pass", "pastp", "wzpast", "demo", "thac", "thvc", "tobj")
+dput(tagful$tagfull) # c(" private verbs ", " THAT deletion ", " contractions ", " present tense verbs ", " 2nd person pronouns ", " DO as pro-verb ", " analytic negation ", " demonstrative pronouns ", " general emphatics ", " 1st person pronouns ", " pronoun IT ", " BE as main verb ", " causatives ", " discourse particles ", " indefinite pronouns ", " hedges ", " amplifiers ", " sentence relatives ", " WH questions ", " possibility modals ", " non-phrasal coordination ", " WH clauses ", " final prepositions ", " nouns ", " word length ", " prepositions ", " type/ token ratio ", " attributive adjectives ", " past tense verbs ", " third person pronouns ", " perfect aspect verbs ", " public verbs ", " synthetic negation ", " present participial clauses ", " pied piping constructions ", " WH relative clauses on object ", " WH relative clauses on subject ", " nominalizations ", " phrasal coordination ", " time adverbials ", " place adverbials ", " adverbs ", " infinitives ", " prediction modals ", " suasive verbs ", " conditional subordination ", " necessity modals ", " split auxiliaries ", " conjuncts ", " other adverbial subordinators ", " BY-passives ", " agentless passives ", " past participial clauses ", " past participial WHIZ deletions ", " demonstratives ", " THAT clauses as adjective complements ", " THAT clauses as verb complements ", " THAT relative clause on object positions ")
+
+write_csv(tagful,"full_tag_names.csv")
+
+qwe <- lodds_list[[1]]
+qwe <- qwe[order(qwe$logodds),]# order the bars ascending
+qwe <- left_join(qwe,tagful)
+qwe <- qwe %>% filter(tag != "awl", tag != "ttr") 
+qwe$tag <- factor(qwe$tag, levels = qwe$tag) # change to factor means ggplot will order the bars in this order
+qwe$colour <-   ifelse(qwe$tag %in% neg, "firebrick4", "gray4")
+qwe$hjust <- ifelse(qwe$logodds > 0, 0.99999999, -0.000001)
+# qwe$yscale <- 2^qwe$logodds
+qwe$diff <- paste0("abs diff: ",round((qwe$HOC - qwe$JOC)*10,1)," / 10k ")
+z <- stringi::stri_pad_both(qwe$diff, width = max(stringi::stri_width(qwe$diff)))
+alpha <- ((qwe$HOC + qwe$JOC))/max((qwe$HOC + qwe$JOC))
+alpha1 <- (abs(qwe$HOC - qwe$JOC))/max(abs(qwe$HOC - qwe$JOC))
+  # guid <- guide_legend("abs freq")
+
+lp1z <-  ggplot(qwe, aes(tag, logodds, label = tagfull)) +
+  geom_text(aes(y = 0, hjust = hjust), colour = qwe$colour) +
+  geom_bar(stat = "identity", fill = qwe$colour,alpha = alpha1, colour="gray70") +
+   coord_flip() + 
+   coord_flip() + labs(x = "", y = "Log ratio of dimension 1 features") +
+     scale_x_discrete(breaks = NULL) +
+  # scale_y_continuous(labels = c(0.25,0.5,1,2,4))
+scale_y_continuous(limits = c(-3.5,2.1), breaks = seq(-2.5, 2, by = 0.5), labels =  c(expression("2"^-2.5), expression("2"^-2), expression("2"^-1.5), expression("2"^-1), expression("2"^-0.5), expression("2"^0), expression("2"^0.5), expression("2"^1), expression("2"^1.5), expression("2"^2))) +
+      theme_minimal() +
+     annotate("label",x=qwe$tag,y=-3.5,label=z,hjust=0, size = 3, family = "mono")
+
+## dimension 2 lp2 and lp2z ####
+
+qwe <- lodds_list[[2]]
+qwe <- qwe[order(qwe$logodds),]# order the bars ascending
+qwe <- left_join(qwe,tagful)
+qwe$tag <- factor(qwe$tag, levels = qwe$tag) # change to factor means ggplot will order the bars in this order
+qwe$colour <-   ifelse(qwe$tag %in% neg, "firebrick4",
+     "gray4")
+qwe$hjust <- ifelse(qwe$logodds > 0, 0.99999999, -0.000001)
+## create alpha values as a ratio of the gap between means in proportion to maximum gap between means
+qwe$alpha1 <- (abs(qwe$HOC - qwe$JOC))/max(abs(qwe$HOC - qwe$JOC))
+qwe$diff <- paste0("abs diff:\n",round((qwe$HOC - qwe$JOC)*10,1)," / 10k ")
+## create an even width label "z"
+z <- stringi::stri_pad_both(qwe$diff, width = max(stringi::stri_width(qwe$diff))) 
+qwe2 <- qwe
+
+lp2 <- ggplot(qwe, aes(tag, logodds, label = tagfull)) +
+  geom_text(aes(y = 0, hjust = hjust), colour = qwe$colour) +
+  geom_bar(stat = "identity", fill = qwe$colour,alpha = qwe$alpha1,colour= "grey70") +
+   coord_flip() + 
+  labs(x = "", y = "Log ratio of dimension 3 features") +
+     scale_x_discrete(breaks = NULL) +
+  scale_y_continuous(limits = c(-2,2), breaks = seq(-2, 2, by = 0.5), labels =  c(expression("2"^-2), expression("2"^-1.5), expression("2"^-1), expression("2"^-0.5), expression("2"^0), expression("2"^0.5), expression("2"^1), expression("2"^1.5), expression("2"^2))) +
+      theme_minimal() +
+    theme(legend.position="none") +
+   annotate("label",x=qwe$tag,y=-2,label=(qwe$diff),hjust=0, size = 3)
+
+lp2z <- ggplot(qwe, aes(tag, logodds, label = tagfull)) +
+  geom_text(aes(y = 0, hjust = hjust), colour = qwe$colour) +
+  geom_bar(stat = "identity", fill = qwe$colour,alpha = qwe$alpha1,,colour= "grey70") +
+   coord_flip() + 
+  labs(x = "", y = "Log ratio of dimension 3 features") +
+     scale_x_discrete(breaks = NULL) +
+  scale_y_continuous(limits = c(-1.5,1.5), breaks = seq(-1.5, 1.5, by = 0.5), labels =  c(expression("2"^-1.5), expression("2"^-1), expression("2"^-0.5), expression("2"^0), expression("2"^0.5), expression("2"^1), expression("2"^1.5))) +
+      theme_minimal() +
+    theme(legend.position="none") +
+   annotate("label",x=qwe$tag,y=-1.5,label=z,hjust=0, size = 3,family ="mono")
+
+## dimension 3 lp2 and lp2z ####
+
+qwe <- lodds_list[[3]]
+qwe <- qwe[order(qwe$logodds),] # order the bars ascending
+qwe <- left_join(qwe3,tagful)
+qwe$tag <- factor(qwe$tag, levels = qwe$tag) # change to factor means ggplot will order the bars in this order
+
+qwe$colour <-   ifelse(qwe$tag %in% neg, "firebrick4","gray4")
+qwe$hjust <- ifelse(qwe$logodds > 0, 0.99999999, -0.000001)
+alpha <- ((qwe$HOC + qwe$JOC))/max((qwe$HOC + qwe$JOC))^.1
+alpha3 <- (abs(qwe$HOC - qwe$JOC))/max(abs(qwe$HOC - qwe$JOC))
+qwe$diff <- paste0("abs diff:\n",round((qwe$HOC - qwe$JOC)*10,1)," / 10k ")
+## create an even width label "z"
+z3 <- stringi::stri_pad_both(qwe$diff, width = max(stringi::stri_width(qwe$diff))) 
+qwe3 <- qwe
+
+
+lp3 <- ggplot(qwe, aes(tag, logodds, label = tagfull)) +
+  geom_text(aes(y = 0, hjust = hjust), colour = qwe$colour) +
+  geom_bar(stat = "identity", fill = qwe$colour,alpha = alpha3) +
+   coord_flip() + 
+  labs(x = "", y = "Log ratio of dimension 3 features") +
+     scale_x_discrete(breaks = NULL) +
+  scale_y_continuous(limits = c(-2,2), labels =  c(expression("2"^-2), expression("2"^-1), expression("2"^0), expression("2"^1), expression("2"^2))) +
+      theme_minimal() +
+    theme(legend.position="none") +
+  annotate("label",x=qwe$tag,y=-2,label=(qwe$diff),hjust=0, size = 3)
+
+lp3z <- ggplot(qwe3, aes(tag, logodds, label = tagfull)) +
+  geom_text(aes(y = 0, hjust = hjust), colour = qwe3$colour) +
+  geom_bar(stat = "identity", fill = qwe3$colour,alpha = alpha1,colour="gray70") +
+   coord_flip() + 
+  labs(x = "", y = "Log ratio of dimension 3 features") +
+     scale_x_discrete(breaks = NULL) +
+    scale_y_continuous(limits = c(-2,2), breaks = seq(-2, 2, by = 0.5), labels =  c(expression("2"^-2), expression("2"^-1.5), expression("2"^-1), expression("2"^-0.5), expression("2"^0), expression("2"^0.5), expression("2"^1), expression("2"^1.5), expression("2"^2))) +
+      theme_minimal() +
+    theme(legend.position="none") +
+  annotate("label",x=qwe3$tag,y=-2,label=z3,hjust=0, size = 3,family ="mono")
+
+
+## dimesnion 4 lp4 nd lp4z
+
+qwe <- lodds_list[[4]]
+qwe <- qwe[order(qwe$logodds),] # order the bars ascending
+qwe <- left_join(qwe,tagful)
+qwe$tag <- factor(qwe$tag, levels = qwe$tag) # change to factor means ggplot will order the bars in this order
+
+qwe$colour <-   ifelse(qwe$tag %in% neg, "firebrick4","gray4")
+qwe$hjust <- ifelse(qwe$logodds > 0, 0.99999999, -0.000001)
+alpha <- ((qwe$HOC + qwe$JOC))/max((qwe$HOC + qwe$JOC))
+alpha4 <- (abs(qwe$HOC - qwe$JOC))/max(abs(qwe$HOC - qwe$JOC))
+qwe$diff <- paste0("abs diff:\n",round((qwe$HOC - qwe$JOC)*10,1)," / 10k ")
+## create an even width label "z"
+z4 <- stringi::stri_pad_both(qwe$diff, width = max(stringi::stri_width(qwe$diff))) 
+qwe4 <- qwe
+
+
+lp4 <- ggplot(qwe, aes(tag, logodds, label = tagfull)) +
+  geom_text(aes(y = 0, hjust = hjust), colour = qwe$colour) +
+  geom_bar(stat = "identity", fill = qwe$colour,alpha = alpha4,colour = "gray70") +
+   coord_flip() + 
+  labs(x = "", y = "Log ratio of dimension 4 features") +
+     scale_x_discrete(breaks = NULL) +
+   scale_y_continuous(limits = c(-2,2), labels =  c(expression("2"^-2), expression("2"^-1), expression("2"^0), expression("2"^1), expression("2"^2))) +
+      theme_minimal() +
+    theme(legend.position="none") +
+  annotate("label",x=qwe$tag,y=-2,label=(qwe$diff),hjust=0, size = 3)
+
+
+
+lp4z <- ggplot(qwe4, aes(tag, logodds, label = tagfull)) +
+  geom_text(aes(y = 0, hjust = hjust), colour = qwe4$colour) +
+  geom_bar(stat = "identity", fill = qwe4$colour,alpha = alpha4,colour = "gray70") +
+   coord_flip() + 
+  labs(x = "", y = "Log ratio of dimension 4 features") +
+     scale_x_discrete(breaks = NULL) +
+  scale_y_continuous(limits = c(-2,1.5), breaks = seq(-1.5, 1.5, by = 0.5), labels =  c(expression("2"^-1.5), expression("2"^-1), expression("2"^-0.5), expression("2"^0), expression("2"^0.5), expression("2"^1), expression("2"^1.5))) +
+      theme_minimal() +
+    theme(legend.position="none") +
+  annotate("label",x=qwe4$tag,y=-2,label=z4,hjust=0, size = 3,family ="mono")
+
+
+## Dimension 5 lp5 and lp5z
+
+qwe <- lodds_list[[5]]
+qwe <- qwe[order(qwe$logodds),] # order the bars ascending
+qwe <- left_join(qwe,tagful)
+qwe$tag <- factor(qwe$tag, levels = qwe$tag) # change to factor means ggplot will order the bars in this order
+
+qwe$colour <-   ifelse(qwe$tag %in% neg, "firebrick4","gray4")
+qwe$hjust <- ifelse(qwe$logodds > 0, 0.99999999, -0.000001)
+alpha5 <- (abs(qwe$HOC - qwe$JOC))/max(abs(qwe$HOC - qwe$JOC))
+qwe$diff <- paste0("abs diff:\n",round((qwe$HOC - qwe$JOC)*10,2)," / 10k ")
+## create an even width label "z"
+z5 <- stringi::stri_pad_both(qwe$diff, width = max(stringi::stri_width(qwe$diff))) 
+qwe5 <- qwe
+
+
+lp5 <- ggplot(qwe, aes(tag, logodds, label = tagfull)) +
+  geom_text(aes(y = 0, hjust = hjust), colour = qwe$colour) +
+  geom_bar(stat = "identity", fill = qwe$colour,alpha = alpha5,colour = "gray70") +
+   coord_flip() + 
+  labs(x = "", y = "Log ratio of dimension 5 features") +
+     scale_x_discrete(breaks = NULL) +
+ scale_y_continuous(limits = c(-2,2), breaks = seq(-2, 2, by = 0.5), labels =  c(expression("2"^-2), expression("2"^-1.5), expression("2"^-1), expression("2"^-0.5), expression("2"^0), expression("2"^0.5), expression("2"^1), expression("2"^1.5), expression("2"^2))) +
+     ggthemes::theme_calc() +
+    theme(legend.position="none") +
+  annotate("label",x=qwe$tag,y=-2,label=(qwe$diff),hjust=0, size = 4)
+
+lp5z <- ggplot(qwe5, aes(tag, logodds, label = tagfull)) +
+  geom_text(aes(y = 0, hjust = hjust), colour = qwe5$colour) +
+  geom_bar(stat = "identity", fill = qwe5$colour,alpha = alpha5,colour = "gray70") +
+   coord_flip() + 
+  labs(x = "", y = "Log ratio of dimension 5 features") +
+     scale_x_discrete(breaks = NULL) +
+ scale_y_continuous(limits = c(-2,1.5), breaks = seq(-1.5, 1.5, by = 0.5), labels =  c( expression("2"^-1.5), expression("2"^-1), expression("2"^-0.5), expression("2"^0), expression("2"^0.5), expression("2"^1), expression("2"^1.5))) +
+     theme_minimal() +
+    theme(legend.position="none") +
+  annotate("label",x=qwe$tag,y=-2,label=z5,hjust=0, size = 4,family ="mono")
+
+
+## Dimesnion 6 lp6 and lp6z
+
+qwe <- lodds_list[[6]]
+qwe <- qwe[order(qwe$logodds),] # order the bars ascending
+qwe <- left_join(qwe,tagful)
+qwe$tag <- factor(qwe$tag, levels = qwe$tag) # change to factor means ggplot will order the bars in this order
+alpha6 <- (abs(qwe$HOC - qwe$JOC))/max(abs(qwe$HOC - qwe$JOC))
+
+qwe$colour <-   ifelse(qwe$tag %in% neg, "firebrick4","gray4")
+qwe$hjust <- ifelse(qwe$logodds > 0, 0.99999999, -0.000001)
+qwe$diff <- paste0("abs diff:\n",round((qwe$HOC - qwe$JOC)*10,1)," / 10k ")
+## create an even width label "z"
+z6 <- stringi::stri_pad_both(qwe$diff, width = max(stringi::stri_width(qwe$diff))) 
+qwe6 <- qwe
+
+lp6 <- ggplot(qwe6, aes(tag, logodds, label = tagfull)) +
+  geom_text(aes(y = 0, hjust = hjust), colour = qwe6$colour) +
+  geom_bar(stat = "identity", fill = qwe6$colour,alpha = alpha6,colour = "gray70") +
+   coord_flip() + 
+  labs(x = "", y = "Log ratio of dimension 6 features") +
+     scale_x_discrete(breaks = NULL) +
+ scale_y_continuous(limits = c(-2,2), labels =  c(expression("2"^-2), expression("2"^-1), expression("2"^0), expression("2"^1), expression("2"^2))) +
+      theme_minimal() +
+    theme(legend.position="none") +
+  annotate("label",x=qwe$tag,y=-2,label=(qwe$diff),hjust=0, size = 4)
+
+lp6z <- ggplot(qwe6, aes(tag, logodds, label = tagfull)) +
+  geom_text(aes(y = 0, hjust = hjust), colour = qwe6$colour) +
+  geom_bar(stat = "identity", fill = qwe6$colour,alpha = alpha6,colour = "gray70") +
+   coord_flip() + 
+  labs(x = "", y = "Log ratio of dimension 6 features") +
+     scale_x_discrete(breaks = NULL) +
+ scale_y_continuous(limits = c(-1.5,1), breaks = seq(-1, 0.5, by = 0.5), labels =  c( expression("2"^-1), expression("2"^-0.5), expression("2"^0), expression("2"^0.5))) +
+      theme_minimal() +
+    theme(legend.position="none") +
+  annotate("label",x=qwe$tag,y=-1.5,label=z6,hjust=0, size = 4,family ="mono")
+
+
+
+grid.arrange(lp1z,lp2z,lp3z,lp4z,lp5z,lp6z,nrow=3)
+
+
+```
+
+
+### create a list of text_ids for random sampling
+```{r}
+text_df <- read_delim("/Users/Tim/Documents/00_R projects/Corpus text selection/2020-03-06_all_texts_df.txt",delim ="\t",col_names = TRUE, quote="")
+
+
+## get a df of just the text_ids > 800
+dimst %>% select(text_id, wordcount, corpus)  -> text_id800
+
+## add the text_df to create the random_select object
+random_select <- left_join(text_id800,text_df)
+
+## add a random sample of 1% for each corpus group
+random_select %>% group_by(corpus) %>% mutate(sample01 = sample(c("select","pass"), size = n(), replace = TRUE, prob = c(.01,.99)))
+
+```
+
+
